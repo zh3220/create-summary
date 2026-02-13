@@ -747,6 +747,16 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
     current_dir = output_root / "current"
     archive_dir = output_root / "archive"
 
+    # Early exit: if there are no PDFs for this run scope/date, do not generate any artifacts.
+    pdf_root = resolve_pdf_scope(complaints_root, scope, date_dir)
+    if not pdf_root.exists():
+        print(f"[SKIP] PDF root not found: {pdf_root}. No artifacts generated.")
+        return {}
+    pdfs = sorted(pdf_root.rglob("*.pdf"))
+    if not pdfs:
+        print(f"[SKIP] No PDFs found under: {pdf_root}. No artifacts generated.")
+        return {}
+
     ver_any = runtime_cfg.get("version") or (runtime_cfg.get("runtime") or {}).get("version") or "runtime_v1"
     rv = _runtime_vnum(str(ver_any))
 
@@ -771,13 +781,6 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
 
     email_cfg = runtime_cfg.get("email") or {}
     subject_prefix = str(email_cfg.get("subject_prefix") or "AFCA Pricing complaints summary")
-
-    pdf_root = resolve_pdf_scope(complaints_root, scope, date_dir)
-    if not pdf_root.exists():
-        raise FileNotFoundError(f"PDF root not found: {pdf_root}")
-    pdfs = sorted(pdf_root.rglob("*.pdf"))
-    if not pdfs:
-        raise FileNotFoundError(f"No PDFs found under: {pdf_root}")
 
     main_fields = [
         "file", "policy_number", "relative_path", "flags", "python_summary", "best_score",
