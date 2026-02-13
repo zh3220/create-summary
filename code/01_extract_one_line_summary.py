@@ -684,13 +684,6 @@ def _build_power_automate_html_body(
     )
 
 
-def _prepare_pa_archive_folder(pa_root: Path, run_date: str) -> Path:
-    """Create an empty daily folder under AFCA_Complaints/archive."""
-    archive_dir = pa_root / "archive" / run_date
-    archive_dir.mkdir(parents=True, exist_ok=True)
-    return archive_dir
-
-
 def _write_power_automate_artifacts(pa_root: Path, body_html: str) -> Path:
     pa_root.mkdir(parents=True, exist_ok=True)
     html_path = pa_root / "complaints.html"
@@ -853,7 +846,6 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
         body_html=pa_html,
     )
     run_date = generated_at.split("T", 1)[0]
-    _prepare_pa_archive_folder(pa_root=pa_root, run_date=run_date)
     pa_pdf_names_path = _write_pdf_names_artifact(
         pa_root=pa_root,
         run_date=run_date,
