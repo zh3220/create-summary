@@ -684,22 +684,38 @@ def _build_power_automate_html_body(
     )
 
 
-def _write_power_automate_artifacts(
-    pa_root: Path,
-    run_date: str,
-    body_html: str,
-) -> Path:
-    dated_dir = pa_root / run_date
-    dated_dir.mkdir(parents=True, exist_ok=True)
-    html_path = dated_dir / f"complaints-{run_date}.html"
+def _archive_existing_pa_files(pa_root: Path) -> None:
+    """Archive existing fixed PA artifacts by their file modified time before regenerating."""
+    html_path = pa_root / "complaints.html"
+    txt_path = pa_root / "pdf_list.txt"
+
+    existing = [p for p in (html_path, txt_path) if p.exists()]
+    if not existing:
+        return
+
+    ts = max(p.stat().st_mtime for p in existing)
+    stamp = datetime.fromtimestamp(ts).strftime("%Y-%m-%d_%H%M%S")
+    backup_dir = pa_root / stamp
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    for src in existing:
+        dst = backup_dir / src.name
+        if dst.exists():
+            dst = backup_dir / f"{src.stem}_{datetime.now().strftime('%H%M%S')}{src.suffix}"
+        shutil.move(str(src), str(dst))
+
+
+def _write_power_automate_artifacts(pa_root: Path, body_html: str) -> Path:
+    pa_root.mkdir(parents=True, exist_ok=True)
+    _archive_existing_pa_files(pa_root)
+    html_path = pa_root / "complaints.html"
     html_path.write_text(body_html, encoding="utf-8")
     return html_path
 
 
-def _write_pdf_names_artifact(pa_root: Path, run_date: str, pdf_names: List[str]) -> Path:
-    dated_dir = pa_root / run_date
-    dated_dir.mkdir(parents=True, exist_ok=True)
-    txt_path = dated_dir / f"pdf-names-{run_date}.txt"
+def _write_pdf_names_artifact(pa_root: Path, pdf_names: List[str]) -> Path:
+    pa_root.mkdir(parents=True, exist_ok=True)
+    txt_path = pa_root / "pdf_list.txt"
     txt_path.write_text("\n".join([x for x in pdf_names if x]), encoding="utf-8")
     return txt_path
 
@@ -839,7 +855,6 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
     learned_terms_report.write_text("Learning disabled in this deterministic Step1 script.\n", encoding="utf-8")
 
     generated_at = datetime.now().isoformat(timespec="seconds")
-    run_date = generated_at.split("T", 1)[0]
     pa_html = _build_power_automate_html_body(
         generated_at=generated_at,
         scope=scope,
@@ -849,12 +864,10 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
     )
     pa_html_path = _write_power_automate_artifacts(
         pa_root=pa_root,
-        run_date=run_date,
         body_html=pa_html,
     )
     pa_pdf_names_path = _write_pdf_names_artifact(
         pa_root=pa_root,
-        run_date=run_date,
         pdf_names=sorted([
             str(
                 r.get("file")
