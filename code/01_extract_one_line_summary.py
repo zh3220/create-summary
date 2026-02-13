@@ -598,12 +598,14 @@ def archive_current_run(current_dir: Path, archive_root: Path, tag: str) -> Path
 
 
 def resolve_pdf_scope(complaints_root: Path, scope: str, date_dir: Optional[str]) -> Path:
+    scope = (scope or "date").strip().lower()
     if scope == "all":
         return complaints_root
     if scope == "date":
-        if not date_dir:
-            raise ValueError("--date_dir is required when --scope date")
-        return complaints_root / date_dir
+        day = (date_dir or datetime.now().strftime("%Y-%m-%d")).strip()
+        if not day:
+            raise ValueError("date_dir cannot be empty when scope=date")
+        return complaints_root / day
     raise ValueError("--scope must be 'all' or 'date'")
 
 
@@ -941,12 +943,25 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--scope", required=True, choices=["all", "date"], help="all or date")
-    ap.add_argument("--date_dir", default=None, help="when scope=date, folder name under complaints/")
+    ap.add_argument(
+        "--scope",
+        default="date",
+        choices=["all", "date"],
+        help="all or date (default: date, using today's folder unless --date_dir is provided)",
+    )
+    ap.add_argument(
+        "--date_dir",
+        default=None,
+        help="when scope=date, folder name under complaints/ (default: today's YYYY-MM-DD)",
+    )
     ap.add_argument("--print", dest="do_print", action="store_true", help="print per-file summaries")
     args = ap.parse_args()
 
-    run_step1(scope=args.scope, date_dir=args.date_dir if args.scope == "date" else None, do_print=bool(args.do_print))
+    run_step1(
+        scope=args.scope,
+        date_dir=args.date_dir if args.scope == "date" else None,
+        do_print=bool(args.do_print),
+    )
 
 
 if __name__ == "__main__":
