@@ -631,14 +631,12 @@ def _build_email_body(
     date_counts: Dict[str, int],
     case_rows: List[Dict[str, str]],
 ) -> str:
+    today_display = (generated_at.split("T", 1)[0] if generated_at else datetime.now().strftime("%Y-%m-%d"))
     lines: List[str] = []
-    lines.append(f"Date: {generated_at}")
-    lines.append(f"Scope: {scope}")
-    if date_dir:
-        lines.append(f"Requested date_dir: {date_dir}")
+    lines.append(f"Date: {today_display}")
     lines.append("")
 
-    lines.append("PDF count by date folder:")
+    lines.append("Complaints count by date:")
     for d in sorted(date_counts.keys()):
         lines.append(f"- {d}: {date_counts[d]}")
 
@@ -647,16 +645,75 @@ def _build_email_body(
     lines.append("")
     lines.append(f"Today total pricing related complaints: {today_count if date_dir else len(case_rows)}")
     lines.append("")
-    lines.append("Complaint details:")
+    lines.append("=== Complaint Details ===")
 
     for i, row in enumerate(case_rows, start=1):
-        lines.append(f"{i}. PolicyNumber: {row.get('policy_number','')}")
-        lines.append(f"   Python Summary: {norm_ws(row.get('python_summary',''))}")
-        lines.append(f"   Original Summary: {norm_ws(row.get('original_summary',''))}")
-        lines.append(f"   PDF: {row.get('relative_path','')}")
+        lines.append("")
+        lines.append(f"--- Case {i} ---")
+        lines.append(f"Policy Number: {row.get('policy_number','')}")
+        lines.append(f"One-line Summary: {row.get('python_summary','')}")
+        lines.append("Original Summary:")
+        lines.append(f"{row.get('original_summary','')}")
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _escape_html(s: str) -> str:
+    return (
+        str(s or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def _build_email_html(
+    generated_at: str,
+    scope: str,
+    date_dir: Optional[str],
+    date_counts: Dict[str, int],
+    case_rows: List[Dict[str, str]],
+) -> str:
+    today_display = (generated_at.split("T", 1)[0] if generated_at else datetime.now().strftime("%Y-%m-%d"))
+    today_label = date_dir if date_dir else datetime.now().strftime("%Y-%m-%d")
+    today_total = today_count = date_counts.get(today_label, 0)
+    if not date_dir:
+        today_total = len(case_rows)
+
+    counts_items = "".join(
+        f"<li><span style='color:#334155'>{_escape_html(d)}</span>: <strong>{date_counts[d]}</strong></li>"
+        for d in sorted(date_counts.keys())
+    )
+
+    case_blocks: List[str] = []
+    for i, row in enumerate(case_rows, start=1):
+        policy = _escape_html(row.get("policy_number", ""))
+        one_line = _escape_html(row.get("python_summary", ""))
+        original = _escape_html(row.get("original_summary", "")).replace("\n", "<br>")
+        block = (
+            "<div style='border-top:1px solid #e2e8f0; margin-top:18px; padding-top:14px;'>"
+            f"<h3 style='margin:0 0 8px 0; color:#0f172a; font-size:16px;'>Case {i}</h3>"
+            f"<h4 style='margin:0 0 8px 0; color:#1d4ed8; font-size:14px;'>Policy Number: {policy}</h4>"
+            f"<p style='margin:0 0 8px 0;'><strong>One-line Summary:</strong> {one_line}</p>"
+            f"<p style='margin:0;'><strong>Original Summary:</strong><br>{original}</p>"
+            "</div>"
+        )
+        case_blocks.append(block)
+
+    cases_html = "".join(case_blocks) if case_blocks else "<p>No complaints found.</p>"
+
+    return (
+        "<html><body style='font-family:Arial,Helvetica,sans-serif; color:#111827; line-height:1.45;'>"
+        f"<p style='margin:0 0 12px 0;'><strong>Date:</strong> {_escape_html(today_display)}</p>"
+        "<h2 style='margin:14px 0 8px 0; color:#0f172a; font-size:18px;'>Complaints count by date</h2>"
+        f"<ul style='margin-top:6px;'>{counts_items}</ul>"
+        f"<p style='margin:14px 0 18px 0; font-size:15px;'><strong>Today total pricing related complaints: {today_total}</strong></p>"
+        "<h2 style='margin:12px 0 8px 0; color:#b45309; font-size:18px;'>Complaint Details</h2>"
+        f"{cases_html}"
+        "</body></html>"
+    )
 
 
 def _write_email_artifacts(
@@ -665,6 +722,7 @@ def _write_email_artifacts(
     recipient_to: str,
     subject: str,
     body_text: str,
+    body_html: str,
     attachment_paths: List[Path],
 ) -> Tuple[Path, Path]:
     txt_path = current_dir / f"pricing_complaints_email_runtime_{rv}.txt"
@@ -678,6 +736,8 @@ def _write_email_artifacts(
     msg["Date"] = formatdate(localtime=True)
     msg["Subject"] = subject
     msg.set_content(body_text)
+    if body_html.strip():
+        msg.add_alternative(body_html, subtype="html")
 
     for ap in attachment_paths:
         try:
@@ -833,12 +893,20 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
         date_counts=date_counts,
         case_rows=case_rows,
     )
+    email_html = _build_email_html(
+        generated_at=generated_at,
+        scope=scope,
+        date_dir=date_dir,
+        date_counts=date_counts,
+        case_rows=case_rows,
+    )
     email_txt_path, email_eml_path = _write_email_artifacts(
         current_dir=current_dir,
         rv=rv,
         recipient_to=recipient_to,
         subject=email_subject,
         body_text=email_body,
+        body_html=email_html,
         attachment_paths=attachment_paths,
     )
 
