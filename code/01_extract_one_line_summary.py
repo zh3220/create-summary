@@ -624,45 +624,6 @@ def _date_bucket_from_relative_path(relative_path: str) -> str:
     return first
 
 
-def _build_power_automate_text_body(
-    generated_at: str,
-    scope: str,
-    date_dir: Optional[str],
-    date_counts: Dict[str, int],
-    case_rows: List[Dict[str, str]],
-) -> str:
-    today_display = (generated_at.split("T", 1)[0] if generated_at else datetime.now().strftime("%Y-%m-%d"))
-    lines: List[str] = []
-    lines.append("Hello team,")
-    lines.append("")
-    lines.append("Today's AFCA pricing complaints summary is ready. Please review the details below.")
-    lines.append("")
-    lines.append(f"Date: {today_display}")
-    lines.append("")
-
-    lines.append("Complaints count by date:")
-    for d in sorted(date_counts.keys()):
-        lines.append(f"- {d}: {date_counts[d]}")
-
-    today_label = date_dir if date_dir else datetime.now().strftime("%Y-%m-%d")
-    today_count = date_counts.get(today_label, 0)
-    lines.append("")
-    lines.append(f"Today total pricing related complaints: {today_count if date_dir else len(case_rows)}")
-    lines.append("")
-    lines.append("=== Complaint Details ===")
-
-    for i, row in enumerate(case_rows, start=1):
-        lines.append("")
-        lines.append(f"--- Case {i} ---")
-        lines.append(f"Policy Number: {row.get('policy_number','')}")
-        lines.append(f"One-line Summary: {row.get('python_summary','')}")
-        lines.append("Original Summary:")
-        lines.append(f"{row.get('original_summary','')}")
-        lines.append("")
-
-    return "\n".join(lines).rstrip() + "\n"
-
-
 def _escape_html(s: str) -> str:
     return (
         str(s or "")
@@ -724,20 +685,14 @@ def _build_power_automate_html_body(
 
 
 def _write_power_automate_artifacts(
-    current_dir: Path,
+    pa_root: Path,
     run_date: str,
-    subject: str,
     body_html: str,
-) -> Tuple[Path, Path]:
-    pa_dir = current_dir / "Power_Automate" / run_date
-    pa_dir.mkdir(parents=True, exist_ok=True)
-
-    subject_path = pa_dir / "subject.txt"
-    html_path = pa_dir / "body.html"
-
-    subject_path.write_text(subject + "\n", encoding="utf-8")
+) -> Path:
+    pa_root.mkdir(parents=True, exist_ok=True)
+    html_path = pa_root / f"complaints-{run_date}.html"
     html_path.write_text(body_html, encoding="utf-8")
-    return subject_path, html_path
+    return html_path
 
 def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, Path]:
     rules_cfg = load_yaml(RULES_CONFIG_PATH)
@@ -748,6 +703,7 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
     output_root = _resolve_path(str(paths.get("output_root") or "_triage_output"))
     current_dir = output_root / "current"
     archive_dir = output_root / "archive"
+    pa_root = output_root / "Power_Automate"
 
     # Early exit: if there are no PDFs for this run scope/date, do not generate any artifacts.
     pdf_root = resolve_pdf_scope(complaints_root, scope, date_dir)
@@ -780,9 +736,6 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
     start_heading = str(rules_cfg.get("start_heading") or "Complaint summary")
     end_heading = str(rules_cfg.get("end_heading") or "Financial firm reference")
     max_chars = int(((runtime_cfg.get("io") or {}).get("py_summary_max_chars")) or 280)
-
-    email_cfg = runtime_cfg.get("email") or {}
-    subject_prefix = str(email_cfg.get("subject_prefix") or "AFCA Pricing complaints summary")
 
     main_fields = [
         "file", "policy_number", "relative_path", "flags", "python_summary", "best_score",
@@ -877,14 +830,6 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
 
     generated_at = datetime.now().isoformat(timespec="seconds")
     run_date = generated_at.split("T", 1)[0]
-    pa_subject = f"{subject_prefix} -- {run_date}"
-    _ = _build_power_automate_text_body(
-        generated_at=generated_at,
-        scope=scope,
-        date_dir=date_dir,
-        date_counts=date_counts,
-        case_rows=case_rows,
-    )
     pa_html = _build_power_automate_html_body(
         generated_at=generated_at,
         scope=scope,
@@ -892,10 +837,9 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
         date_counts=date_counts,
         case_rows=case_rows,
     )
-    pa_subject_path, pa_html_path = _write_power_automate_artifacts(
-        current_dir=current_dir,
+    pa_html_path = _write_power_automate_artifacts(
+        pa_root=pa_root,
         run_date=run_date,
-        subject=pa_subject,
         body_html=pa_html,
     )
 
@@ -923,7 +867,6 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
             "quality_report": str(report_path),
             "learned_terms": str(learned_terms_path),
             "learned_terms_report": str(learned_terms_report),
-            "pa_subject_txt": str(pa_subject_path),
             "pa_html": str(pa_html_path),
         },
     }, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -936,7 +879,6 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
         "diag_csv": diag_path,
         "report": report_path,
         "meta": meta_path,
-        "pa_subject_txt": pa_subject_path,
         "pa_html": pa_html_path,
     }
 
