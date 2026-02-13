@@ -695,7 +695,8 @@ def _archive_existing_pa_files(pa_root: Path) -> None:
 
     ts = max(p.stat().st_mtime for p in existing)
     stamp = datetime.fromtimestamp(ts).strftime("%Y-%m-%d_%H%M%S")
-    backup_dir = pa_root / stamp
+    archive_root = pa_root / "archive"
+    backup_dir = archive_root / stamp
     backup_dir.mkdir(parents=True, exist_ok=True)
 
     for src in existing:
