@@ -703,7 +703,7 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
     output_root = _resolve_path(str(paths.get("output_root") or "_triage_output"))
     current_dir = output_root / "current"
     archive_dir = output_root / "archive"
-    pa_root = output_root / "Power_Automate"
+    pa_root = output_root / "AFCA_Complaints"
 
     # Early exit: if there are no PDFs for this run scope/date, do not generate any artifacts.
     pdf_root = resolve_pdf_scope(complaints_root, scope, date_dir)
