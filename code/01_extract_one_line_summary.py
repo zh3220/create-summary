@@ -5,8 +5,6 @@ import re
 import shutil
 import shlex
 import subprocess
-from email.message import EmailMessage
-from email.utils import formatdate
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -624,7 +622,7 @@ def _date_bucket_from_relative_path(relative_path: str) -> str:
     return first
 
 
-def _build_email_body(
+def _build_power_automate_text_body(
     generated_at: str,
     scope: str,
     date_dir: Optional[str],
@@ -633,6 +631,10 @@ def _build_email_body(
 ) -> str:
     today_display = (generated_at.split("T", 1)[0] if generated_at else datetime.now().strftime("%Y-%m-%d"))
     lines: List[str] = []
+    lines.append("Hello team,")
+    lines.append("")
+    lines.append("Today's AFCA pricing complaints summary is ready. Please review the details below.")
+    lines.append("")
     lines.append(f"Date: {today_display}")
     lines.append("")
 
@@ -669,7 +671,7 @@ def _escape_html(s: str) -> str:
     )
 
 
-def _build_email_html(
+def _build_power_automate_html_body(
     generated_at: str,
     scope: str,
     date_dir: Optional[str],
@@ -678,7 +680,7 @@ def _build_email_html(
 ) -> str:
     today_display = (generated_at.split("T", 1)[0] if generated_at else datetime.now().strftime("%Y-%m-%d"))
     today_label = date_dir if date_dir else datetime.now().strftime("%Y-%m-%d")
-    today_total = today_count = date_counts.get(today_label, 0)
+    today_total = date_counts.get(today_label, 0)
     if not date_dir:
         today_total = len(case_rows)
 
@@ -706,6 +708,9 @@ def _build_email_html(
 
     return (
         "<html><body style='font-family:Arial,Helvetica,sans-serif; color:#111827; line-height:1.45;'>"
+        "<p style='margin:0 0 8px 0;'>Hello team,</p>"
+        "<p style='margin:0 0 14px 0;'>Today's AFCA pricing complaints summary is ready. "
+        "Please review the details below.</p>"
         f"<p style='margin:0 0 12px 0;'><strong>Date:</strong> {_escape_html(today_display)}</p>"
         "<h2 style='margin:14px 0 8px 0; color:#0f172a; font-size:18px;'>Complaints count by date</h2>"
         f"<ul style='margin-top:6px;'>{counts_items}</ul>"
@@ -716,38 +721,21 @@ def _build_email_html(
     )
 
 
-def _write_email_artifacts(
+def _write_power_automate_artifacts(
     current_dir: Path,
-    rv: str,
-    recipient_to: str,
+    run_date: str,
     subject: str,
-    body_text: str,
     body_html: str,
-    attachment_paths: List[Path],
 ) -> Tuple[Path, Path]:
-    txt_path = current_dir / f"pricing_complaints_email_runtime_{rv}.txt"
-    eml_path = current_dir / f"pricing_complaints_email_runtime_{rv}.eml"
+    pa_dir = current_dir / "Power_Automate" / run_date
+    pa_dir.mkdir(parents=True, exist_ok=True)
 
-    txt_path.write_text(body_text, encoding="utf-8")
+    subject_path = pa_dir / "subject.txt"
+    html_path = pa_dir / "body.html"
 
-    msg = EmailMessage()
-    msg["To"] = recipient_to
-    msg["From"] = "noreply@example.com"
-    msg["Date"] = formatdate(localtime=True)
-    msg["Subject"] = subject
-    msg.set_content(body_text)
-    if body_html.strip():
-        msg.add_alternative(body_html, subtype="html")
-
-    for ap in attachment_paths:
-        try:
-            data = ap.read_bytes()
-            msg.add_attachment(data, maintype="application", subtype="pdf", filename=ap.name)
-        except Exception:
-            continue
-
-    eml_path.write_bytes(msg.as_bytes())
-    return txt_path, eml_path
+    subject_path.write_text(subject + "\n", encoding="utf-8")
+    html_path.write_text(body_html, encoding="utf-8")
+    return subject_path, html_path
 
 def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, Path]:
     rules_cfg = load_yaml(RULES_CONFIG_PATH)
@@ -782,8 +770,7 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
     max_chars = int(((runtime_cfg.get("io") or {}).get("py_summary_max_chars")) or 280)
 
     email_cfg = runtime_cfg.get("email") or {}
-    recipient_to = str(email_cfg.get("to") or "recipient@example.com")
-    email_subject = str(email_cfg.get("subject") or f"Pricing complaints daily summary ({rv})")
+    subject_prefix = str(email_cfg.get("subject_prefix") or "AFCA Pricing complaints summary")
 
     pdf_root = resolve_pdf_scope(complaints_root, scope, date_dir)
     if not pdf_root.exists():
@@ -806,7 +793,6 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
     low_score = 0
     date_counts: Dict[str, int] = {}
     case_rows: List[Dict[str, str]] = []
-    attachment_paths: List[Path] = []
 
     with open(csv_path, "w", encoding="utf-8-sig", newline="") as fm, open(diag_path, "w", encoding="utf-8-sig", newline="") as fd:
         wm = csv.DictWriter(fm, fieldnames=main_fields)
@@ -820,7 +806,6 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
             policy = pdf.stem.split("_", 1)[0]
             date_bucket = _date_bucket_from_relative_path(rel)
             date_counts[date_bucket] = date_counts.get(date_bucket, 0) + 1
-            attachment_paths.append(pdf)
             try:
                 full_text = read_pdf_text(pdf)
                 section = extract_between_headings(full_text, start_heading, end_heading)
@@ -886,28 +871,27 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
     learned_terms_report.write_text("Learning disabled in this deterministic Step1 script.\n", encoding="utf-8")
 
     generated_at = datetime.now().isoformat(timespec="seconds")
-    email_body = _build_email_body(
+    run_date = generated_at.split("T", 1)[0]
+    pa_subject = f"{subject_prefix} -- {run_date}"
+    _ = _build_power_automate_text_body(
         generated_at=generated_at,
         scope=scope,
         date_dir=date_dir,
         date_counts=date_counts,
         case_rows=case_rows,
     )
-    email_html = _build_email_html(
+    pa_html = _build_power_automate_html_body(
         generated_at=generated_at,
         scope=scope,
         date_dir=date_dir,
         date_counts=date_counts,
         case_rows=case_rows,
     )
-    email_txt_path, email_eml_path = _write_email_artifacts(
+    pa_subject_path, pa_html_path = _write_power_automate_artifacts(
         current_dir=current_dir,
-        rv=rv,
-        recipient_to=recipient_to,
-        subject=email_subject,
-        body_text=email_body,
-        body_html=email_html,
-        attachment_paths=attachment_paths,
+        run_date=run_date,
+        subject=pa_subject,
+        body_html=pa_html,
     )
 
     report_lines = [
@@ -934,15 +918,22 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
             "quality_report": str(report_path),
             "learned_terms": str(learned_terms_path),
             "learned_terms_report": str(learned_terms_report),
-            "email_txt": str(email_txt_path),
-            "email_eml": str(email_eml_path),
+            "pa_subject_txt": str(pa_subject_path),
+            "pa_html": str(pa_html_path),
         },
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
     run_arch = archive_current_run(current_dir, archive_dir, f"runtime_{rv}")
     print(f"[ARCHIVE] archived run -> {run_arch}")
 
-    return {"csv": csv_path, "diag_csv": diag_path, "report": report_path, "meta": meta_path, "email_txt": email_txt_path, "email_eml": email_eml_path}
+    return {
+        "csv": csv_path,
+        "diag_csv": diag_path,
+        "report": report_path,
+        "meta": meta_path,
+        "pa_subject_txt": pa_subject_path,
+        "pa_html": pa_html_path,
+    }
 
 
 def main() -> None:
