@@ -611,93 +611,6 @@ def resolve_pdf_scope(complaints_root: Path, scope: str, date_dir: Optional[str]
 
 
 
-def _date_bucket_from_relative_path(relative_path: str) -> str:
-    rel = str(relative_path or "").replace("\\", "/")
-    parts = [x for x in rel.split("/") if x]
-    if not parts:
-        return "unknown"
-    first = parts[0]
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", first):
-        return first
-    if re.fullmatch(r"\d{8}", first):
-        return f"{first[:4]}-{first[4:6]}-{first[6:8]}"
-    return first
-
-
-def _escape_html(s: str) -> str:
-    return (
-        str(s or "")
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-    )
-
-
-def _build_power_automate_html_body(
-    generated_at: str,
-    scope: str,
-    date_dir: Optional[str],
-    date_counts: Dict[str, int],
-    case_rows: List[Dict[str, str]],
-) -> str:
-    today_display = (generated_at.split("T", 1)[0] if generated_at else datetime.now().strftime("%Y-%m-%d"))
-    today_label = date_dir if date_dir else datetime.now().strftime("%Y-%m-%d")
-    today_total = date_counts.get(today_label, 0)
-    if not date_dir:
-        today_total = len(case_rows)
-
-    counts_items = "".join(
-        f"<li><span style='color:#334155'>{_escape_html(d)}</span>: <strong>{date_counts[d]}</strong></li>"
-        for d in sorted(date_counts.keys())
-    )
-
-    case_blocks: List[str] = []
-    for i, row in enumerate(case_rows, start=1):
-        policy = _escape_html(row.get("policy_number", ""))
-        one_line = _escape_html(row.get("python_summary", ""))
-        original = _escape_html(row.get("original_summary", "")).replace("\n", "<br>")
-        block = (
-            "<div style='border-top:1px solid #e2e8f0; margin-top:18px; padding-top:14px;'>"
-            f"<h3 style='margin:0 0 8px 0; color:#0f172a; font-size:16px;'>Case {i}</h3>"
-            f"<h4 style='margin:0 0 8px 0; color:#1d4ed8; font-size:14px;'>Policy Number: {policy}</h4>"
-            f"<p style='margin:0 0 8px 0;'><strong>One-line Summary:</strong> {one_line}</p>"
-            f"<p style='margin:0;'><strong>Original Summary:</strong><br>{original}</p>"
-            "</div>"
-        )
-        case_blocks.append(block)
-
-    cases_html = "".join(case_blocks) if case_blocks else "<p>No complaints found.</p>"
-
-    return (
-        "<html><body style='font-family:Arial,Helvetica,sans-serif; color:#111827; line-height:1.45;'>"
-        "<p style='margin:0 0 8px 0;'>Hello team,</p>"
-        "<p style='margin:0 0 14px 0;'>Today's AFCA pricing complaints summary is ready. "
-        "Please review the details below.</p>"
-        f"<p style='margin:0 0 12px 0;'><strong>Date:</strong> {_escape_html(today_display)}</p>"
-        "<h2 style='margin:14px 0 8px 0; color:#0f172a; font-size:18px;'>Complaints count by date</h2>"
-        f"<ul style='margin-top:6px;'>{counts_items}</ul>"
-        f"<p style='margin:14px 0 18px 0; font-size:15px;'><strong>Today total pricing related complaints: {today_total}</strong></p>"
-        "<h2 style='margin:12px 0 8px 0; color:#b45309; font-size:18px;'>Complaint Details</h2>"
-        f"{cases_html}"
-        "</body></html>"
-    )
-
-
-def _write_power_automate_artifacts(pa_root: Path, body_html: str) -> Path:
-    pa_root.mkdir(parents=True, exist_ok=True)
-    html_path = pa_root / "complaints.html"
-    html_path.write_text(body_html, encoding="utf-8")
-    return html_path
-
-
-def _write_pdf_names_artifact(pa_root: Path, run_date: str, pdf_names: List[str]) -> Path:
-    pa_root.mkdir(parents=True, exist_ok=True)
-    txt_path = pa_root / "pdf_list.txt"
-    lines = [f"/{run_date}/{x}" for x in pdf_names if x]
-    txt_path.write_text("\n".join(lines), encoding="utf-8")
-    return txt_path
-
 def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, Path]:
     rules_cfg = load_yaml(RULES_CONFIG_PATH)
     runtime_cfg = load_yaml(RUNTIME_ACTIVE_PATH)
@@ -707,7 +620,6 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
     output_root = _resolve_path(str(paths.get("output_root") or "_triage_output"))
     current_dir = output_root / "current"
     archive_dir = output_root / "archive"
-    pa_root = output_root / "AFCA_Complaints"
 
     # Early exit: if there are no PDFs for this run scope/date, do not generate any artifacts.
     pdf_root = resolve_pdf_scope(complaints_root, scope, date_dir)
@@ -753,8 +665,6 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
     total = 0
     needs_review = 0
     low_score = 0
-    date_counts: Dict[str, int] = {}
-    case_rows: List[Dict[str, str]] = []
 
     with open(csv_path, "w", encoding="utf-8-sig", newline="") as fm, open(diag_path, "w", encoding="utf-8-sig", newline="") as fd:
         wm = csv.DictWriter(fm, fieldnames=main_fields)
@@ -766,8 +676,6 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
             total += 1
             rel = str(pdf.relative_to(complaints_root))
             policy = pdf.stem.split("_", 1)[0]
-            date_bucket = _date_bucket_from_relative_path(rel)
-            date_counts[date_bucket] = date_counts.get(date_bucket, 0) + 1
             try:
                 full_text = read_pdf_text(pdf)
                 section = extract_between_headings(full_text, start_heading, end_heading)
@@ -804,13 +712,6 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
                 "notes": notes,
             }
             wm.writerow(row)
-            case_rows.append({
-                "file": pdf.name,
-                "policy_number": policy,
-                "python_summary": summary,
-                "original_summary": original,
-                "relative_path": rel,
-            })
             wd.writerow({
                 "file": pdf.name,
                 "policy_number": policy,
@@ -834,30 +735,6 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
     learned_terms_report.write_text("Learning disabled in this deterministic Step1 script.\n", encoding="utf-8")
 
     generated_at = datetime.now().isoformat(timespec="seconds")
-    pa_html = _build_power_automate_html_body(
-        generated_at=generated_at,
-        scope=scope,
-        date_dir=date_dir,
-        date_counts=date_counts,
-        case_rows=case_rows,
-    )
-    pa_html_path = _write_power_automate_artifacts(
-        pa_root=pa_root,
-        body_html=pa_html,
-    )
-    run_date = generated_at.split("T", 1)[0]
-    pa_pdf_names_path = _write_pdf_names_artifact(
-        pa_root=pa_root,
-        run_date=run_date,
-        pdf_names=sorted([
-            str(
-                r.get("file")
-                or Path(str(r.get("relative_path") or "")).name
-                or ""
-            )
-            for r in case_rows
-        ]),
-    )
 
     report_lines = [
         f"Generated: {generated_at}",
@@ -883,8 +760,6 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
             "quality_report": str(report_path),
             "learned_terms": str(learned_terms_path),
             "learned_terms_report": str(learned_terms_report),
-            "pa_html": str(pa_html_path),
-            "pa_pdf_names_txt": str(pa_pdf_names_path),
         },
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -896,8 +771,6 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
         "diag_csv": diag_path,
         "report": report_path,
         "meta": meta_path,
-        "pa_html": pa_html_path,
-        "pa_pdf_names_txt": pa_pdf_names_path,
     }
 
 
