@@ -15,6 +15,11 @@ ACTIVE_PATH = CONFIG_DIR / "runtime_config_active.yaml"
 NEXT_PATH = CONFIG_DIR / "runtime_config_next.yaml"
 
 
+def _resolve_arg_path(p: str) -> Path:
+    pp = Path(str(p or "").strip()).expanduser()
+    return pp if pp.is_absolute() else (PROJECT_ROOT / pp).resolve()
+
+
 def load_yaml(path: Path) -> Dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError(path)
@@ -33,7 +38,17 @@ def main() -> None:
     ap.add_argument("--min_money_recall", type=float, default=0.70)
     args = ap.parse_args()
 
-    eval_path = Path(args.eval_report).expanduser().resolve()
+    eval_path = _resolve_arg_path(args.eval_report)
+    rules_path = _resolve_arg_path(args.rules)
+    weights_path = _resolve_arg_path(args.weights)
+
+    missing = [str(p) for p in (eval_path, rules_path, weights_path) if not p.exists()]
+    if missing:
+        raise FileNotFoundError(
+            "Missing input file(s):\n- " + "\n- ".join(missing) +
+            f"\nCurrent working dir: {Path.cwd()}\nProject root: {PROJECT_ROOT}"
+        )
+
     report = json.loads(eval_path.read_text(encoding="utf-8"))
     metrics = report.get("metrics", {})
     f1 = float(metrics.get("avg_token_f1", 0.0))
@@ -49,8 +64,8 @@ def main() -> None:
     cfg.setdefault("learning_runtime", {})
     cfg["learning_runtime"].update({
         "enabled": True,
-        "rules_auto_path": str(Path(args.rules).expanduser().resolve()),
-        "weights_path": str(Path(args.weights).expanduser().resolve()),
+        "rules_auto_path": str(rules_path),
+        "weights_path": str(weights_path),
         "promoted_at": datetime.now().isoformat(timespec="seconds"),
         "eval_report": str(eval_path),
     })
