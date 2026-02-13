@@ -810,6 +810,7 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
             }
             wm.writerow(row)
             case_rows.append({
+                "file": pdf.name,
                 "policy_number": policy,
                 "python_summary": summary,
                 "original_summary": original,
@@ -854,7 +855,14 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
     pa_pdf_names_path = _write_pdf_names_artifact(
         pa_root=pa_root,
         run_date=run_date,
-        pdf_names=sorted([str(r.get("file") or "") for r in case_rows]),
+        pdf_names=sorted([
+            str(
+                r.get("file")
+                or Path(str(r.get("relative_path") or "")).name
+                or ""
+            )
+            for r in case_rows
+        ]),
     )
 
     report_lines = [
