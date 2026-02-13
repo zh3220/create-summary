@@ -689,10 +689,19 @@ def _write_power_automate_artifacts(
     run_date: str,
     body_html: str,
 ) -> Path:
-    pa_root.mkdir(parents=True, exist_ok=True)
-    html_path = pa_root / f"complaints-{run_date}.html"
+    dated_dir = pa_root / run_date
+    dated_dir.mkdir(parents=True, exist_ok=True)
+    html_path = dated_dir / f"complaints-{run_date}.html"
     html_path.write_text(body_html, encoding="utf-8")
     return html_path
+
+
+def _write_pdf_names_artifact(pa_root: Path, run_date: str, pdf_names: List[str]) -> Path:
+    dated_dir = pa_root / run_date
+    dated_dir.mkdir(parents=True, exist_ok=True)
+    txt_path = dated_dir / f"pdf-names-{run_date}.txt"
+    txt_path.write_text("\n".join([x for x in pdf_names if x]), encoding="utf-8")
+    return txt_path
 
 def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, Path]:
     rules_cfg = load_yaml(RULES_CONFIG_PATH)
@@ -842,6 +851,11 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
         run_date=run_date,
         body_html=pa_html,
     )
+    pa_pdf_names_path = _write_pdf_names_artifact(
+        pa_root=pa_root,
+        run_date=run_date,
+        pdf_names=sorted([str(r.get("file") or "") for r in case_rows]),
+    )
 
     report_lines = [
         f"Generated: {generated_at}",
@@ -868,6 +882,7 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
             "learned_terms": str(learned_terms_path),
             "learned_terms_report": str(learned_terms_report),
             "pa_html": str(pa_html_path),
+            "pa_pdf_names_txt": str(pa_pdf_names_path),
         },
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -880,6 +895,7 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
         "report": report_path,
         "meta": meta_path,
         "pa_html": pa_html_path,
+        "pa_pdf_names_txt": pa_pdf_names_path,
     }
 
 
