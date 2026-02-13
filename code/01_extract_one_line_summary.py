@@ -714,10 +714,11 @@ def _write_power_automate_artifacts(pa_root: Path, body_html: str) -> Path:
     return html_path
 
 
-def _write_pdf_names_artifact(pa_root: Path, pdf_names: List[str]) -> Path:
+def _write_pdf_names_artifact(pa_root: Path, run_date: str, pdf_names: List[str]) -> Path:
     pa_root.mkdir(parents=True, exist_ok=True)
     txt_path = pa_root / "pdf_list.txt"
-    txt_path.write_text("\n".join([x for x in pdf_names if x]), encoding="utf-8")
+    lines = [f"/{run_date}/{x}" for x in pdf_names if x]
+    txt_path.write_text("\n".join(lines), encoding="utf-8")
     return txt_path
 
 def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, Path]:
@@ -867,8 +868,10 @@ def run_step1(scope: str, date_dir: Optional[str], do_print: bool) -> Dict[str, 
         pa_root=pa_root,
         body_html=pa_html,
     )
+    run_date = generated_at.split("T", 1)[0]
     pa_pdf_names_path = _write_pdf_names_artifact(
         pa_root=pa_root,
+        run_date=run_date,
         pdf_names=sorted([
             str(
                 r.get("file")
