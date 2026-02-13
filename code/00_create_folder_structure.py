@@ -13,6 +13,11 @@ def ensure_folder_structure(root: Path) -> None:
         root / "_triage_output" / "archive",
         root / "_triage_output" / "AFCA_Complaints",
         root / "_triage_output" / "AFCA_Complaints" / "archive",
+        root / "learning",
+        root / "learning" / "feedback",
+        root / "learning" / "datasets",
+        root / "learning" / "models",
+        root / "learning" / "history",
     ]
 
     for d in dirs:
