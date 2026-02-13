@@ -13,12 +13,23 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_DIR = PROJECT_ROOT / "config"
 ACTIVE_PATH = CONFIG_DIR / "runtime_config_active.yaml"
 NEXT_PATH = CONFIG_DIR / "runtime_config_next.yaml"
+LEARNING_DIR = PROJECT_ROOT / "learning"
+MODELS_DIR = LEARNING_DIR / "models"
+HISTORY_DIR = LEARNING_DIR / "history"
 
 
 def _resolve_arg_path(p: str) -> Path:
     pp = Path(str(p or "").strip()).expanduser()
     return pp if pp.is_absolute() else (PROJECT_ROOT / pp).resolve()
 
+
+
+
+def _latest_file(folder: Path, pattern: str) -> Path:
+    files = sorted(folder.glob(pattern), key=lambda x: x.stat().st_mtime)
+    if not files:
+        raise FileNotFoundError(f"No files found for pattern '{pattern}' in {folder}")
+    return files[-1]
 
 def load_yaml(path: Path) -> Dict[str, Any]:
     if not path.exists():
@@ -31,16 +42,16 @@ def load_yaml(path: Path) -> Dict[str, Any]:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Promote learned model paths into runtime_config_next.yaml.")
-    ap.add_argument("--eval_report", required=True, help="Path to eval_report_*.json")
-    ap.add_argument("--rules", required=True, help="Path to rules_auto_*.json")
-    ap.add_argument("--weights", required=True, help="Path to weights_*.json")
+    ap.add_argument("--eval_report", default=None, help="Path to eval_report_*.json (default: latest in learning/history)")
+    ap.add_argument("--rules", default=None, help="Path to rules_auto_*.json (default: latest in learning/models)")
+    ap.add_argument("--weights", default=None, help="Path to weights_*.json (default: latest in learning/models)")
     ap.add_argument("--min_f1", type=float, default=0.30)
     ap.add_argument("--min_money_recall", type=float, default=0.70)
     args = ap.parse_args()
 
-    eval_path = _resolve_arg_path(args.eval_report)
-    rules_path = _resolve_arg_path(args.rules)
-    weights_path = _resolve_arg_path(args.weights)
+    eval_path = _resolve_arg_path(args.eval_report) if args.eval_report else _latest_file(HISTORY_DIR, "eval_report_*.json")
+    rules_path = _resolve_arg_path(args.rules) if args.rules else _latest_file(MODELS_DIR, "rules_auto_*.json")
+    weights_path = _resolve_arg_path(args.weights) if args.weights else _latest_file(MODELS_DIR, "weights_*.json")
 
     missing = [str(p) for p in (eval_path, rules_path, weights_path) if not p.exists()]
     if missing:
